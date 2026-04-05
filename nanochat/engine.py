@@ -158,8 +158,8 @@ def sample_next_token(logits, rng, temperature=1.0, top_k=None, top_p=None):
         # Remove tokens with cumulative probability above the threshold (keep at least one token)
         sorted_mask = cumulative_probs - F.softmax(sorted_logits, dim=-1) >= top_p
         sorted_logits[sorted_mask] = float('-inf')
-        # Scatter back to original indices
-        logits = sorted_logits.scatter(1, sorted_indices, sorted_logits)
+        # Scatter back to original ordering
+        logits = logits.scatter(1, sorted_indices, sorted_logits)
     probs = F.softmax(logits, dim=-1)
     return torch.multinomial(probs, num_samples=1, generator=rng)
 

@@ -26,7 +26,7 @@ from tasks.spellingbee import SpellingBee
 # -----------------------------------------------------------------------------
 # Generative evaluation loop (we go one problem at a time, sample, evaluate)
 
-def run_generative_eval(task_object, tokenizer, model, engine, num_samples, max_new_tokens, temperature, top_k, max_problems=None):
+def run_generative_eval(task_object, tokenizer, model, engine, num_samples, max_new_tokens, temperature, top_k, top_p=None, max_problems=None):
 
     ddp, ddp_rank, ddp_local_rank, ddp_world_size = get_dist_info()
     device = model.get_device()
@@ -47,6 +47,7 @@ def run_generative_eval(task_object, tokenizer, model, engine, num_samples, max_
             max_tokens=max_new_tokens,
             temperature=temperature,
             top_k=top_k,
+            top_p=top_p,
         )
         # Decode the completions as text
         prefix_length = len(encoded_prompt)
@@ -156,7 +157,7 @@ def run_categorical_eval(task_object, tokenizer, model, batch_size, max_problems
 
 def run_chat_eval(task_name, model, tokenizer, engine,
                    batch_size=1, num_samples=1, max_new_tokens=512, temperature=0.0, top_k=50,
-                   max_problems=None):
+                   top_p=None, max_problems=None):
     # Create the evaluation object
     task_module = {
         'HumanEval': HumanEval,
@@ -169,7 +170,7 @@ def run_chat_eval(task_name, model, tokenizer, engine,
     task_object = task_module()
     # Run the evaluation
     if task_object.eval_type == 'generative':
-        acc = run_generative_eval(task_object, tokenizer, model, engine, num_samples, max_new_tokens, temperature, top_k, max_problems=max_problems)
+        acc = run_generative_eval(task_object, tokenizer, model, engine, num_samples, max_new_tokens, temperature, top_k, top_p=top_p, max_problems=max_problems)
     elif task_object.eval_type == 'categorical':
         acc = run_categorical_eval(task_object, tokenizer, model, batch_size, max_problems=max_problems)
     else:
@@ -187,6 +188,7 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--max-new-tokens', type=int, default=512)
     parser.add_argument('-n', '--num-samples', type=int, default=1)
     parser.add_argument('-k', '--top-k', type=int, default=50)
+    parser.add_argument('-p', '--top-p', type=float, default=None, help='Top-p (nucleus) sampling threshold')
     parser.add_argument('-b', '--batch-size', type=int, default=8, help='Batch size for categorical evaluation')
     parser.add_argument('-g', '--model-tag', type=str, default=None, help='Model tag to load')
     parser.add_argument('-s', '--step', type=int, default=None, help='Step to load')
@@ -223,6 +225,7 @@ if __name__ == "__main__":
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
             top_k=args.top_k,
+            top_p=args.top_p,
             max_problems=args.max_problems,
         )
         results[task_name] = acc

@@ -20,9 +20,7 @@ import time
 import wandb
 import torch
 from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, get_base_dir, autodetect_device_type, get_peak_flops, COMPUTE_DTYPE, COMPUTE_DTYPE_REASON, is_ddp_initialized
-from nanochat.tokenizer import get_token_bytes
 from nanochat.checkpoint_manager import save_checkpoint, load_model, load_optimizer_state
-from nanochat.loss_eval import evaluate_bpb
 import torch.distributed as dist
 from nanochat.flash_attention import HAS_FA3
 from nanochat.engine import Engine
@@ -59,11 +57,10 @@ parser.add_argument("--warmup-ratio", type=float, default=0.1, help="ratio of it
 parser.add_argument("--warmdown-ratio", type=float, default=0.5, help="ratio of iterations for LR warmdown")
 parser.add_argument("--final-lr-frac", type=float, default=0.0, help="final LR as fraction of initial LR")
 # Evaluation
-parser.add_argument("--eval-every", type=int, default=100, help="evaluate val bpb every N steps (-1 = disable)")
-parser.add_argument("--eval-tokens", type=int, default=40*524288, help="number of tokens to evaluate val loss on")
 parser.add_argument("--chatcore-every", type=int, default=-1, help="evaluate ChatCORE metric every N steps (-1 = disable)")
 parser.add_argument("--chatcore-max-cat", type=int, default=-1, help="max problems per categorical task for ChatCORE")
 parser.add_argument("--chatcore-max-sample", type=int, default=24, help="max problems per generative task for ChatCORE")
+parser.add_argument("--save-every", type=int, default=-1, help="save intermediate checkpoint every N steps (-1 = only at end)")
 # SSD data
 parser.add_argument("--ssd-data", type=str, default=None, help="Path to SSD training data JSONL (default: auto)")
 args = parser.parse_args()
@@ -124,7 +121,6 @@ grad_accum_steps = args.total_batch_size // world_tokens_per_fwdbwd
 print0(f"Tokens / micro-batch / rank: {args.device_batch_size} x {args.max_seq_len} = {tokens_per_fwdbwd:,}")
 print0(f"Tokens / micro-batch: {world_tokens_per_fwdbwd:,}")
 print0(f"Total batch size {args.total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
-token_bytes = get_token_bytes(device=device)
 
 # Initialize the Optimizer
 optimizer = model.setup_optimizer(unembedding_lr=args.unembedding_lr, embedding_lr=args.embedding_lr, matrix_lr=args.matrix_lr, weight_decay=0.0)
@@ -330,8 +326,9 @@ while True:
         })
         model.train()
 
-    # save checkpoint at the end of the run
-    if last_step:
+    # save checkpoint at the end or periodically
+    should_save = last_step or (args.save_every > 0 and step > 0 and step % args.save_every == 0)
+    if should_save:
         output_dirname = args.model_tag if args.model_tag else f"d{depth}"
         checkpoint_dir = os.path.join(base_dir, "chatssd_checkpoints", output_dirname)
         save_checkpoint(
